@@ -1,32 +1,26 @@
 import cv2
 import os
 import pandas as pd
-
+import numpy as np
 from sklearn.metrics import confusion_matrix, classification_report
 from skimage.feature import graycomatrix, graycoprops
-# Procesar la imagen para extraer características
-def process(image):
-    img = image
-    # Calcular estadísticas de intensidad
-    glcm = graycomatrix(image, distances=[1], angles=[0], levels=256, symmetric=True, normed=True)
+
+
+def process(img):
+    glcm = graycomatrix(img, distances=[1], angles=[0], levels=256, symmetric=True, normed=True)
 
     contrast = graycoprops(glcm, 'contrast')[0, 0]
-    pixel_values = img.ravel()
     dissimilarity = graycoprops(glcm, 'dissimilarity')[0, 0]
-    homogeneity = graycoprops(glcm, 'homogeneity')[0, 0]
-    kurtosis = pd.Series(pixel_values).kurtosis()
+    edge_percentage = np.sum(cv2.Canny(img, 100, 200)) / (img.shape[0] * img.shape[1])
 
-    # Crear un diccionario con las características calculadas
     data = {
+        'edge_percentage': edge_percentage,
         'glcm_dissimilarity': dissimilarity,
-        'glcm_homogeneity': homogeneity,
-        'kurtosis': kurtosis,
         'glcm_contrast': contrast,
     }
 
     return img, data
 
-# Extraer características y etiquetas
 def extract_features(image_dir,base_dir, classes):
     features = []
     labels = []
@@ -34,7 +28,6 @@ def extract_features(image_dir,base_dir, classes):
     for label, class_name in enumerate(classes):
         image_path = os.path.join(image_dir, class_name)
         mask_dir = os.path.join(base_dir, class_name)
-        mask_dir = os.path.join(mask_dir, "mask2")
 
         if not os.path.exists(mask_dir):
             print(f"Directorio no encontrado: {mask_dir}")
@@ -47,7 +40,7 @@ def extract_features(image_dir,base_dir, classes):
                 img = cv2.imread(image, cv2.IMREAD_GRAYSCALE)
                 mask = cv2.imread(mask, cv2.IMREAD_GRAYSCALE)
                 _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-                mask = cv2.resize(mask, (img.shape[1], img.shape[0]))  # Ensure mask is the same size as img
+                mask = cv2.resize(mask, (img.shape[1], img.shape[0]))
                 img = cv2.bitwise_and(img, img, mask=mask)
                 img = cv2.equalizeHist(img)
                 if img is not None:
@@ -59,21 +52,27 @@ def extract_features(image_dir,base_dir, classes):
 
     return pd.DataFrame(features), labels
 
-# Función para la clasificación binaria utilizando ifs
+
 def simple_classification(data):
-    if data['glcm_dissimilarity'] > 1.4 and data['glcm_homogeneity'] > 0.78:
-       return 'Graso'
-    else:
-        if data['glcm_contrast'] <= 24:
-            return "Glandular-denso"
-        else:
-            if data['kurtosis'] <= 0.2:
+    if data['glcm_contrast'] <= 42:
+        if data['glcm_dissimilarity'] <= 1:
+            if data['glcm_contrast'] <= 30:
                 return "Glandular-denso"
+            else:
+                return "Glandular-graso"
+        else:
+            return "Glandular-denso"
+    else:
+        if data['glcm_contrast'] <= 49:
+            return "Glandular-graso"
+        else:
+            if data['edge_percentage'] <= 8:
+                return "Graso"
             else:
                 return "Glandular-graso"
 
 
-# Clasificar imágenes
+
 def classify_images(features):
     predictions = []
 
@@ -83,22 +82,14 @@ def classify_images(features):
 
     return predictions
 
-# Calcular métricas
 def calculate_metrics(labels, predictions, classes):
-    # Convertir etiquetas a nombres de clases
     labels_names = [classes[label] for label in labels]
-
-    # Matriz de confusión
-    cm = confusion_matrix(labels_names, predictions, labels=classes)
-    print("\nMatriz de Confusión:")
-    print(cm)
 
     # Reporte de clasificación
     report = classification_report(labels_names, predictions, target_names=classes)
-    print("\nReporte de Clasificación:")
+    print("\nReport de Clasificación:")
     print(report)
 
-# Ejemplo de uso
 if __name__ == "__main__":
 
     image_dir = "Material Mama/"
@@ -107,15 +98,12 @@ if __name__ == "__main__":
 
     features, labels = extract_features(image_dir,mask_dir, classes)
 
-    # Clasificar las imágenes
     if not features.empty:
         predictions = classify_images(features)
 
-        # Mostrar resultados
         for label, pred in zip(labels, predictions):
             print(f"Clase real: {classes[label]} - Predicción: {pred}")
 
-        # Calcular y mostrar métricas
         calculate_metrics(labels, predictions, classes)
     else:
         print("No se encontraron características para clasificar.")
