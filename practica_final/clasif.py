@@ -5,7 +5,6 @@ import numpy as np
 from sklearn.metrics import confusion_matrix, classification_report
 from skimage.feature import graycomatrix, graycoprops
 
-
 def process(img):
     glcm = graycomatrix(img, distances=[1], angles=[0], levels=256, symmetric=True, normed=True)
 
@@ -21,7 +20,7 @@ def process(img):
 
     return img, data
 
-def extract_features(image_dir,base_dir, classes):
+def extract_features(image_dir, base_dir, classes):
     features = []
     labels = []
 
@@ -52,7 +51,6 @@ def extract_features(image_dir,base_dir, classes):
 
     return pd.DataFrame(features), labels
 
-
 def simple_classification(data):
     if data['glcm_contrast'] <= 42:
         if data['glcm_dissimilarity'] <= 1:
@@ -71,8 +69,6 @@ def simple_classification(data):
             else:
                 return "Glandular-graso"
 
-
-
 def classify_images(features):
     predictions = []
 
@@ -81,6 +77,22 @@ def classify_images(features):
         predictions.append(pred)
 
     return predictions
+
+def classify_single_image(image_path):
+    mask_dir = "ProcMM"
+    image_dir = "Material Mama"
+    mask = os.path.join(mask_dir, image_path)
+    image = os.path.join(image_dir, image_path)
+    img = cv2.imread(image, cv2.IMREAD_GRAYSCALE)
+    mask = cv2.imread(mask, cv2.IMREAD_GRAYSCALE)
+    _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    mask = cv2.resize(mask, (img.shape[1], img.shape[0]))
+    img = cv2.bitwise_and(img, img, mask=mask)
+    img = cv2.equalizeHist(img)
+    _, data = process(img)
+
+    prediction = simple_classification(data)
+    return prediction
 
 def calculate_metrics(labels, predictions, classes):
     labels_names = [classes[label] for label in labels]
@@ -96,14 +108,17 @@ if __name__ == "__main__":
     mask_dir = "ProcMM"
     classes = ["Glandular-denso", "Glandular-graso", "Graso"]
 
-    features, labels = extract_features(image_dir,mask_dir, classes)
+    features, labels = extract_features(image_dir, mask_dir, classes)
 
     if not features.empty:
         predictions = classify_images(features)
-
-        for label, pred in zip(labels, predictions):
-            print(f"Clase real: {classes[label]} - Predicción: {pred}")
-
         calculate_metrics(labels, predictions, classes)
     else:
         print("No se encontraron características para clasificar.")
+
+    try:
+        image_path = "Glandular-denso/mdb107.jpg"
+        prediction = classify_single_image(image_path)
+        print(f"La predicción para la imagen es: {prediction}")
+    except ValueError as e:
+        print(e)

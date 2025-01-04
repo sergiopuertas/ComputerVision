@@ -1,76 +1,69 @@
 import cv2
 import numpy as np
-import os
 from skimage.feature import graycomatrix, graycoprops
+import os
+
+def xor_and_border_masks(mask1_path, mask2_path):
+
+    mask1 = cv2.imread(mask1_path, cv2.IMREAD_GRAYSCALE)
+    segmented_mask = cv2.imread(mask2_path, cv2.IMREAD_GRAYSCALE)
+
+    if mask1 is None or segmented_mask is None:
+        raise ValueError("No se pudieron cargar una o ambas máscaras correctamente.")
+
+    xor_mask = cv2.bitwise_xor(mask1, segmented_mask)
+    return segmented_mask, xor_mask
 
 
-def sliding_window_contrast(image, mask, window_size=(50, 50)):
-    """
-    Calcula el contraste de la imagen utilizando una ventana deslizante sobre la región extraída por mask1.
+def region_contrast(image, mask):
 
-    Parameters:
-        image (np.array): Imagen original en escala de grises.
-        mask (np.array): Máscara .
-        window_size (tuple): Tamaño de la ventana deslizante (alto, ancho).
+    region = cv2.bitwise_and(image, image, mask=mask)
 
-    Returns:
-        contrast_values (list): Lista con los valores de contraste calculados en cada ventana.
-    """
+    glcm = graycomatrix(region, distances=[1], angles=[0], symmetric=True, normed=True)
 
-    image = cv2.imread(image, cv2.IMREAD_GRAYSCALE)
-    mask2 = cv2.imread(mask, cv2.IMREAD_GRAYSCALE)
+    contrast = graycoprops(glcm, 'contrast')[0, 0]
 
-    if len(image.shape) == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    region = cv2.bitwise_and(image, image, mask=mask2)
-
-    height, width = region.shape
-    window_height, window_width = window_size
-
-    contrast_values = []
-
-    for y in range(0, height - window_height + 1, window_height // 2):
-        for x in range(0, width - window_width + 1, window_width // 2):
-            window = region[y:y + window_height, x:x + window_width]
-
-            if np.count_nonzero(window) > 0:
-                glcm = graycomatrix(window, distances=[1], angles=[0], symmetric=True, normed=True)
-
-                contrast = graycoprops(glcm, 'contrast')[0, 0]
-                contrast_values.append(contrast)
-
-    return np.mean(contrast_values)
+    return contrast
 
 
-def process_all_images(image_folder, mask_base_folder, classes):
-    """
-    Procesa todas las imágenes en una carpeta y calcula el contraste promedio.
+def interregion_contrast(image_path, mask1_path, mask2_path):
 
-    Parameters:
-        image_folder (str): Carpeta que contiene las imágenes originales.
-        mask_base_folder (str): Carpeta base que contiene las máscaras.
-        classes (list): Lista de subcarpetas (clases) dentro de la carpeta de máscaras.
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if image is None:
+        raise ValueError("No se pudo cargar la imagen correctamente.")
 
-    Returns:
-        dict: Métricas promedio de contraste entre todas las imágenes procesadas.
-    """
+    segmented_mask, xor_mask = xor_and_border_masks(mask1_path, mask2_path)
+
+    mask_contrast = region_contrast(image, segmented_mask)
+    xor_contrast = region_contrast(image, xor_mask)
+
+    contrast_diff = abs(mask_contrast - xor_contrast)
+
+    return mask_contrast, xor_contrast, contrast_diff
+
+
+def process_all_images(image_folder, proc_first_folder, proc_mm_folder, classes):
+
     contrast_diff_total = 0
     total_images = 0
 
     for class_name in classes:
-        class_mask_folder = os.path.join(mask_base_folder, class_name)
-        image_fold= os.path.join(image_folder, class_name)
-        for image_filename in os.listdir(image_fold):
-            image_path = os.path.join(image_fold, image_filename)
-            mask_path = os.path.join(class_mask_folder, image_filename)
+        first_mask_folder = os.path.join(proc_first_folder, class_name)
+        mm_mask_folder = os.path.join(proc_mm_folder, class_name)
+        image_folder_class = os.path.join(image_folder, class_name)
 
-            if (
-                os.path.isfile(image_path)
-                and os.path.isfile(mask_path)
-            ):
+        for image_filename in os.listdir(image_folder_class):
+            image_path = os.path.join(image_folder_class, image_filename)
+            first_mask_path = os.path.join(first_mask_folder, image_filename)
+            mm_mask_path = os.path.join(mm_mask_folder, image_filename)
 
-                contrast_diff = sliding_window_contrast(image_path, mask_path, window_size=(50, 50))
-                print(f"Contraste entre regiones en {class_name}/{image_filename}: {contrast_diff:.4f}")
+            if os.path.isfile(image_path) and os.path.isfile(first_mask_path) and os.path.isfile(mm_mask_path):
+                # Calcular el contraste interregión entre la máscara y la región XOR
+                mask_contrast, xor_contrast, contrast_diff = interregion_contrast(image_path, first_mask_path, mm_mask_path)
+
+                print(f"Contraste región mamaria en {class_name}/{image_filename}: {mask_contrast:.4f}")
+                print(f"Contraste región muscular en {class_name}/{image_filename}: {xor_contrast:.4f}")
+                print(f"Diferencia de contraste en {class_name}/{image_filename}: {contrast_diff:.4f}\n")
 
                 contrast_diff_total += contrast_diff
                 total_images += 1
@@ -78,17 +71,18 @@ def process_all_images(image_folder, mask_base_folder, classes):
     contrast_diff_avg = contrast_diff_total / total_images if total_images > 0 else 0
 
     return {
-        "Average Contrast Mask Difference": contrast_diff_avg,
-        "Total Images Processed": total_images,
+        "Diferencia media de contraste": contrast_diff_avg,
+        "Total de imágenes procesadas": total_images,
     }
 
 
-
-image_folder = "Material Mama/"
-mask_folder = "ProcMM/"
+image_folder = "Material Mama"
+proc_first_folder = "ProcFirst"
+proc_mm_folder = "ProcMM"
 classes = ["Glandular-denso", "Glandular-graso", "Graso"]
-results = process_all_images(image_folder, mask_folder, classes)
-print("Resultados Promedio de Contraste:")
-for key, value in results.items():
-    print(f"{key}: {value:.4f}" if isinstance(value, float) else f"{key}: {value}")
 
+results = process_all_images(image_folder, proc_first_folder, proc_mm_folder, classes)
+
+print("Resultados:")
+for key, value in results.items():
+     print(f"{key}: {value:.4f}" if isinstance(value, float) else f"{key}: {value}")

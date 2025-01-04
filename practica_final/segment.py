@@ -14,8 +14,8 @@ def delete_bg(image):
 
     return region_inside, mask
 
-
 def homogene(image, mask):
+
     band_threshold = 187
 
     band_mask = cv2.inRange(image, band_threshold, 255)
@@ -109,7 +109,7 @@ def segment(image_path):
     plt.axis('off')
 
     plt.show()
-    return segmented, mask2
+    return segmented, mask2, mask1
 
 
 base_dir = "Material Mama"
@@ -120,14 +120,17 @@ for root, dirs, files in os.walk(base_dir):
         if file.lower().endswith('.jpg'):
             image_path = os.path.join(root, file)
             print(f"Procesando imagen: {image_path}")
-
-            region_inside, mask = segment(image_path)
+            region_inside, mask, mask1 = segment(image_path)
 
             class_dir = os.path.relpath(root, base_dir)
             output_path_mask = os.path.join(out_dir, class_dir, file)
             os.makedirs(os.path.dirname(output_path_mask), exist_ok=True)
+
+            class_dir_first = os.path.relpath(root, base_dir)
+            output_path_First = os.path.join("ProcFirst", class_dir_first, file)
+            os.makedirs(os.path.dirname(output_path_First), exist_ok=True)
             cv2.imwrite(output_path_mask, mask)
-            print(f"Máscara guardada en: {output_path_mask}")
+            cv2.imwrite(output_path_First, mask1)
 
 
 
